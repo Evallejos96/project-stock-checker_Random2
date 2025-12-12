@@ -20,7 +20,7 @@
     "request-promise-native": "^1.0.5"
   },
   "engines": {
-    "node": "4.4.3"
+    "node": "18.x"
   },
   "repository": {
     "type": "git",

@@ -8,85 +8,85 @@
 
 'use strict';
 
-var mongoose = require('mongoose')
-var objectId = mongoose.Types.ObjectId
-var request = require('request-promise-native')
+const mongoose = require('mongoose');
+const request = require('request-promise-native');
 
-var stockSchema = new mongoose.Schema({
+const stockSchema = new mongoose.Schema({
   code: String,
   likes: { type: [String], default: [] }
-})
+});
 
-var Stock = mongoose.model('stock', stockSchema)
+const Stock = mongoose.model('stock', stockSchema);
 
+// Guardar stock y likes
 function saveStock(code, like, ip) {
   return Stock.findOne({ code: code })
     .then(stock => {
       if (!stock) {
-        let newStock = new Stock({ code: code, likes: like ? [ip] : [] })
-        return newStock.save()
+        const newStock = new Stock({ code: code, likes: like ? [ip] : [] });
+        return newStock.save();
       } else {
-        if (like && stock.likes.indexOf(ip) === -1) {
-          stock.likes.push(ip)
+        if (like && !stock.likes.includes(ip)) {
+          stock.likes.push(ip);
         }
-        return stock.save()
+        return stock.save();
       }
-    })
+    });
 }
 
+// Parsear resultados
 function parseData(data) {
-  let i = 0
-  let stockData = []
-  let likes = []
-  while (i < data.length) {
-    let stock = { stock: data[i].code, price: parseFloat(data[i+1]) }
-    likes.push(data[i].likes.length)
-    stockData.push(stock)
-    i += 2
+  const stockData = [];
+  const likesArr = [];
+
+  for (let i = 0; i < data.length; i += 2) {
+    const stock = { stock: data[i].code, price: parseFloat(data[i + 1]) };
+    likesArr.push(data[i].likes.length);
+    stockData.push(stock);
   }
 
-  if (likes.length > 1) {
-    stockData[0].rel_likes = likes[0] - likes[1]
-    stockData[1].rel_likes = likes[1] - likes[0]
+  if (likesArr.length > 1) {
+    stockData[0].rel_likes = likesArr[0] - likesArr[1];
+    stockData[1].rel_likes = likesArr[1] - likesArr[0];
   } else {
-    stockData[0].likes = likes[0]
-    stockData = stockData[0]
+    stockData[0].likes = likesArr[0];
+    return stockData[0];
   }
-  
-  return stockData
+
+  return stockData;
 }
 
-module.exports = function (app) {
-  
-  app.get('/api/testing', (req, res) => {
-    console.log(req.connection)
-    
-    res.json({ IP: req.ip })
-  })
-  
+module.exports = function(app) {
+
   app.route('/api/stock-prices')
-    .get(function (req, res) {
-      let code = req.query.stock || ''
-      if (!Array.isArray(code)) {
-        code = [code]
+    .get(async function(req, res) {
+      try {
+        let codes = req.query.stock || '';
+        if (!Array.isArray(codes)) codes = [codes];
+
+        const ip = req.ip;
+        const like = req.query.like === 'true' || req.query.like === true;
+
+        const promises = [];
+
+        for (let code of codes) {
+          const upperCode = code.toUpperCase();
+          // Guardar likes en DB
+          promises.push(saveStock(upperCode, like, ip));
+          // Obtener precio del proxy FCC
+          const url = `https://stock-price-checker-proxy.freecodecamp.rocks/v1/stock/${upperCode}/quote`;
+          promises.push(request({ uri: url, json: true }).then(res => res.latestPrice));
+        }
+
+        const results = await Promise.all(promises);
+        const stockData = parseData(results);
+
+        res.json({ stockData });
+
+      } catch (err) {
+        console.error(err);
+        res.json({ error: 'external source error' });
       }
-    
-      let promises = []
-      code.forEach(code => {
-        promises.push(saveStock(code.toUpperCase(), req.query.like, req.ip))
-        
-        let url = `https://api.iextrading.com/1.0/stock/${code.toUpperCase()}/price`
-        promises.push(request(url))
-      })
-    
-      Promise.all(promises)
-        .then(data => {
-          let stockData = parseData(data)
-          res.json({ stockData })
-        })
-        .catch(err => {
-          console.log(err)
-          res.send(err)
-        })
-    })
-}
+    });
+
+};
